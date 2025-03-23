@@ -24,8 +24,6 @@ void pin_callback(uint gpio, uint32_t events){
         t0 = to_us_since_boot(get_absolute_time());
     }else{
         tf = to_us_since_boot(get_absolute_time());
-        // faça o print do delta mas dentro deste else
-        printf("Delta: %d\n", tf - t0);
         uint32_t delta = tf - t0; 
         xQueueSendFromISR(xQueueTime, &delta, NULL);
     }
