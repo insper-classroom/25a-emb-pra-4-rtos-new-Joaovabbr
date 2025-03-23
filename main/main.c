@@ -18,8 +18,8 @@ QueueHandle_t xQueueDistance;
 
 
 void pin_callback(uint gpio, uint32_t events){  
-    uint32_t t0;
-    uint32_t tf;
+    uint32_t t0= 0;
+    uint32_t tf= 0;
     if(gpio_get(ECHO)){
         t0 = to_us_since_boot(get_absolute_time());
     }else{
