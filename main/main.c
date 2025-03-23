@@ -11,9 +11,6 @@
 
 const int TRIGGER = 16;
 const int ECHO = 17;
-volatile uint32_t t0 = 0;
-volatile uint32_t tf;
-volatile int erro = 0;
 
 SemaphoreHandle_t xSemaphoreTrigger;
 QueueHandle_t xQueueTime;
@@ -21,6 +18,8 @@ QueueHandle_t xQueueDistance;
 
 
 void pin_callback(uint gpio, uint32_t events){  
+    uint32_t t0;
+    uint32_t tf;
     if(gpio_get(ECHO)){
         t0 = to_us_since_boot(get_absolute_time());
     }else{
@@ -54,21 +53,18 @@ void trigger_task(void *p){
 }
 void echo_task(void *p){
     uint32_t time;
+    int erro;
     double distancia;
     while(1){
-        while (tf == 0 ){
-            erro = to_us_since_boot(get_absolute_time()) - t0 > 500000 ? 1 : 0;
-        }
-
-        if (erro == 1) {
-            distancia = -1;
+        if(xQueueReceive(xQueueTime,&time,0)){
+            erro = time > 500000 ? 1 : 0;
+            distancia = time * (0.0343 / 2);
+            if (erro == 1) {
+                distancia = -1;
+            }
+            xQueueSend(xQueueDistance, &distancia, 0);
         }
         
-        if(xQueueReceive(xQueueTime,&time,0)){
-            distancia = time * (0.0343 / 2);
-            
-        }
-        xQueueSend(xQueueDistance, &distancia, 0);
     }
 }
 
