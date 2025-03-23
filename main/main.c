@@ -1,6 +1,3 @@
-/*
- * LED blink with FreeRTOS
- */
 #include <FreeRTOS.h>
 #include <task.h>
 #include <semphr.h>
@@ -12,123 +9,104 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 
-const uint BTN_1_OLED = 28;
-const uint BTN_2_OLED = 26;
-const uint BTN_3_OLED = 27;
+const int TRIGGER = 16;
+const int ECHO = 17;
+volatile uint32_t t0 = 0;
+volatile uint32_t tf;
+volatile int erro = 0;
 
-const uint LED_1_OLED = 20;
-const uint LED_2_OLED = 21;
-const uint LED_3_OLED = 22;
+SemaphoreHandle_t xSemaphoreTrigger;
+QueueHandle_t xQueueTime;
+QueueHandle_t xQueueDistance;
 
+
+void pin_callback(uint gpio, uint32_t events){  
+    if(gpio_get(ECHO)){
+        t0 = to_us_since_boot(get_absolute_time());
+    }else{
+        tf = to_us_since_boot(get_absolute_time());
+        // faça o print do delta mas dentro deste else
+        printf("Delta: %d\n", tf - t0);
+        uint32_t delta = tf - t0; 
+        xQueueSendFromISR(xQueueTime, &delta, NULL);
+    }
+    
+    
+}
 void oled1_btn_led_init(void) {
-    gpio_init(LED_1_OLED);
-    gpio_set_dir(LED_1_OLED, GPIO_OUT);
+    gpio_init(TRIGGER);
+    gpio_set_dir(TRIGGER, GPIO_OUT);
 
-    gpio_init(LED_2_OLED);
-    gpio_set_dir(LED_2_OLED, GPIO_OUT);
+    gpio_init(ECHO);
+    gpio_set_dir(ECHO, GPIO_IN);
 
-    gpio_init(LED_3_OLED);
-    gpio_set_dir(LED_3_OLED, GPIO_OUT);
-
-    gpio_init(BTN_1_OLED);
-    gpio_set_dir(BTN_1_OLED, GPIO_IN);
-    gpio_pull_up(BTN_1_OLED);
-
-    gpio_init(BTN_2_OLED);
-    gpio_set_dir(BTN_2_OLED, GPIO_IN);
-    gpio_pull_up(BTN_2_OLED);
-
-    gpio_init(BTN_3_OLED);
-    gpio_set_dir(BTN_3_OLED, GPIO_IN);
-    gpio_pull_up(BTN_3_OLED);
+    gpio_set_irq_enabled_with_callback(ECHO, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &pin_callback);
 }
 
-void oled1_demo_1(void *p) {
-    printf("Inicializando Driver\n");
-    ssd1306_init();
-
-    printf("Inicializando GLX\n");
-    ssd1306_t disp;
-    gfx_init(&disp, 128, 32);
-
-    printf("Inicializando btn and LEDs\n");
-    oled1_btn_led_init();
-
-    char cnt = 15;
-    while (1) {
-
-        if (gpio_get(BTN_1_OLED) == 0) {
-            cnt = 15;
-            gpio_put(LED_1_OLED, 0);
-            gfx_clear_buffer(&disp);
-            gfx_draw_string(&disp, 0, 0, 1, "LED 1 - ON");
-            gfx_show(&disp);
-        } else if (gpio_get(BTN_2_OLED) == 0) {
-            cnt = 15;
-            gpio_put(LED_2_OLED, 0);
-            gfx_clear_buffer(&disp);
-            gfx_draw_string(&disp, 0, 0, 1, "LED 2 - ON");
-            gfx_show(&disp);
-        } else if (gpio_get(BTN_3_OLED) == 0) {
-            cnt = 15;
-            gpio_put(LED_3_OLED, 0);
-            gfx_clear_buffer(&disp);
-            gfx_draw_string(&disp, 0, 0, 1, "LED 3 - ON");
-            gfx_show(&disp);
-        } else {
-
-            gpio_put(LED_1_OLED, 1);
-            gpio_put(LED_2_OLED, 1);
-            gpio_put(LED_3_OLED, 1);
-            gfx_clear_buffer(&disp);
-            gfx_draw_string(&disp, 0, 0, 1, "PRESSIONE ALGUM");
-            gfx_draw_string(&disp, 0, 10, 1, "BOTAO");
-            gfx_draw_line(&disp, 15, 27, cnt,
-                          27);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            if (++cnt == 112)
-                cnt = 15;
-
-            gfx_show(&disp);
+void trigger_task(void *p){
+    while(1){
+        vTaskDelay(pdMS_TO_TICKS(0.3));  
+        gpio_put(TRIGGER, 1);
+        vTaskDelay(pdMS_TO_TICKS(0.01));
+        gpio_put(TRIGGER, 0);
+        xSemaphoreGive(xSemaphoreTrigger);
+    }
+}
+void echo_task(void *p){
+    uint32_t time;
+    double distancia;
+    while(1){
+        while (tf == 0 ){
+            erro = to_us_since_boot(get_absolute_time()) - t0 > 500000 ? 1 : 0;
         }
+
+        if (erro == 1) {
+            distancia = -1;
+        }
+        
+        if(xQueueReceive(xQueueTime,&time,0)){
+            distancia = time * (0.0343 / 2);
+            
+        }
+        xQueueSend(xQueueDistance, &distancia, 0);
     }
 }
 
-void oled1_demo_2(void *p) {
-    printf("Inicializando Driver\n");
+void oled_task(void *p) {
     ssd1306_init();
 
-    printf("Inicializando GLX\n");
     ssd1306_t disp;
     gfx_init(&disp, 128, 32);
 
-    printf("Inicializando btn and LEDs\n");
+
     oled1_btn_led_init();
-
-    char cnt = 15;
+    double distancia;
     while (1) {
+        if (xSemaphoreTake(xSemaphoreTrigger, 0)) {
+            if (xQueueReceive(xQueueDistance, &distancia, 0)){
+                if (distancia != -1){
+                    char buffer[50];
+                    sprintf(buffer, "Dist: %.2f cm", distancia);
+                    gfx_clear_buffer(&disp);
+                    gfx_draw_string(&disp, 0, 0, 1, buffer);
+                    gfx_draw_line(&disp, 0, 27, (distancia/100) * 100, 27);
+                    gfx_show(&disp);
+                    vTaskDelay(pdMS_TO_TICKS(150));
+                }
+            }
+        }
 
-        gfx_clear_buffer(&disp);
-        gfx_draw_string(&disp, 0, 0, 1, "Mandioca");
-        gfx_show(&disp);
-        vTaskDelay(pdMS_TO_TICKS(150));
-
-        gfx_clear_buffer(&disp);
-        gfx_draw_string(&disp, 0, 0, 2, "Batata");
-        gfx_show(&disp);
-        vTaskDelay(pdMS_TO_TICKS(150));
-
-        gfx_clear_buffer(&disp);
-        gfx_draw_string(&disp, 0, 0, 4, "Inhame");
-        gfx_show(&disp);
-        vTaskDelay(pdMS_TO_TICKS(150));
     }
 }
 
 int main() {
     stdio_init_all();
-
-    xTaskCreate(oled1_demo_2, "Demo 2", 4095, NULL, 1, NULL);
+    xSemaphoreTrigger = xSemaphoreCreateBinary();
+    xQueueTime = xQueueCreate(32, sizeof(uint32_t));
+    xQueueDistance = xQueueCreate(32, sizeof(double));
+    xTaskCreate(echo_task, "Echo", 256, NULL, 1, NULL);
+    xTaskCreate(trigger_task, "Trigger", 256, NULL, 1, NULL);
+    xTaskCreate(oled_task, "OLED task", 4095, NULL, 1, NULL);
 
     vTaskStartScheduler();
 
