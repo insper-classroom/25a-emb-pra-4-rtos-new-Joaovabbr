@@ -18,15 +18,14 @@ QueueHandle_t xQueueDistance;
 
 
 void pin_callback(uint gpio, uint32_t events){  
-    uint32_t t0= 0;
-    uint32_t tf= 0;
+    uint32_t t= 0;
     if(gpio_get(ECHO)){
-        t0 = to_us_since_boot(get_absolute_time());
+        t = to_us_since_boot(get_absolute_time());
     }else{
-        tf = to_us_since_boot(get_absolute_time());
-        uint32_t delta = tf - t0; 
-        xQueueSendFromISR(xQueueTime, &delta, NULL);
+        t = to_us_since_boot(get_absolute_time());
     }
+    xQueueSendFromISR(xQueueTime, &t, NULL);
+
     
     
 }
@@ -50,17 +49,18 @@ void trigger_task(void *p){
     }
 }
 void echo_task(void *p){
-    uint32_t time;
+    uint32_t t0 = 0;
+    uint32_t tf = 0;
     int erro;
     double distancia;
     while(1){
-        if(xQueueReceive(xQueueTime,&time,0)){
-            erro = time > 500000 ? 1 : 0;
-            distancia = time * (0.0343 / 2);
-            if (erro == 1) {
-                distancia = -1;
+        if(xQueueReceive(xQueueTime,&t0,0)){
+            if(xQueueReceive(xQueueTime,&tf,1000)){
+                uint32_t delta = tf - t0; 
+                distancia = delta * (0.0343 / 2);
+                xQueueSend(xQueueDistance, &distancia, pdMS_TO_TICKS(10));
             }
-            xQueueSend(xQueueDistance, &distancia, 0);
+
         }
         
     }
@@ -77,8 +77,7 @@ void oled_task(void *p) {
     double distancia;
     while (1) {
         if (xSemaphoreTake(xSemaphoreTrigger, 0)) {
-            if (xQueueReceive(xQueueDistance, &distancia, 0)){
-                if (distancia != -1){
+            if (xQueueReceive(xQueueDistance, &distancia, 500)){
                     char buffer[50];
                     sprintf(buffer, "Dist: %.2f cm", distancia);
                     gfx_clear_buffer(&disp);
@@ -86,7 +85,11 @@ void oled_task(void *p) {
                     gfx_draw_line(&disp, 0, 27, (distancia/100) * 100, 27);
                     gfx_show(&disp);
                     vTaskDelay(pdMS_TO_TICKS(150));
-                }
+            } else {
+                gfx_clear_buffer(&disp);
+                gfx_draw_string(&disp, 0, 0, 1, "Falha");
+                gfx_show(&disp);
+                vTaskDelay(pdMS_TO_TICKS(150));
             }
         }
 
