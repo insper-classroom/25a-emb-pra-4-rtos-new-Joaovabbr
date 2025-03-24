@@ -51,7 +51,6 @@ void trigger_task(void *p){
 void echo_task(void *p){
     uint32_t t0 = 0;
     uint32_t tf = 0;
-    int erro;
     double distancia;
     while(1){
         if(xQueueReceive(xQueueTime,&t0,0)){
